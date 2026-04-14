@@ -1,0 +1,142 @@
+import numpy as np
+import PyQt5.QtWidgets as qtw
+
+from LeastSquares import LeastSquaresFit_Class
+
+
+class Pump_Model():
+    """
+    This is the pump model. It just stores data.
+    """
+    def __init__(self):
+        self.PumpName = ""
+        self.FlowUnits = ""
+        self.HeadUnits = ""
+
+        self.FlowData = np.array([])
+        self.HeadData = np.array([])
+        self.EffData = np.array([])
+
+        self.HeadCoefficients = np.array([])
+        self.EfficiencyCoefficients = np.array([])
+
+        self.LSFitHead = LeastSquaresFit_Class()
+        self.LSFitEff = LeastSquaresFit_Class()
+
+
+class Pump_Controller():
+    def __init__(self):
+        self.Model = Pump_Model()
+        self.View = Pump_View()
+
+    def ImportFromFile(self, data):
+        """
+        This processes the list of strings in data to build the pump model.
+        """
+        self.Model.PumpName = data[0].strip()
+
+        L = data[2].split()
+        self.Model.FlowUnits = L[0].strip()
+        self.Model.HeadUnits = L[1].strip()
+
+        self.SetData(data[3:])
+        self.updateView()
+
+    def SetData(self, data):
+        """
+        Expects three columns of data in an array of strings with space delimiter.
+        Parse line and build arrays.
+        """
+        self.Model.FlowData = np.array([])
+        self.Model.HeadData = np.array([])
+        self.Model.EffData = np.array([])
+
+        for L in data:
+            Cells = L.split()
+            if len(Cells) >= 3:
+                self.Model.FlowData = np.append(self.Model.FlowData, float(Cells[0].strip()))
+                self.Model.HeadData = np.append(self.Model.HeadData, float(Cells[1].strip()))
+                self.Model.EffData = np.append(self.Model.EffData, float(Cells[2].strip()))
+
+        self.LSFit()
+
+    def LSFit(self):
+        """
+        Fit quadratic for head and cubic for efficiency.
+        """
+        self.Model.LSFitHead.x = self.Model.FlowData
+        self.Model.LSFitHead.y = self.Model.HeadData
+        self.Model.LSFitHead.LeastSquares(2)
+
+        self.Model.LSFitEff.x = self.Model.FlowData
+        self.Model.LSFitEff.y = self.Model.EffData
+        self.Model.LSFitEff.LeastSquares(3)
+
+    def setViewWidgets(self, w):
+        self.View.setViewWidgets(w)
+
+    def updateView(self):
+        self.View.updateView(self.Model)
+
+
+class Pump_View():
+    def __init__(self):
+        self.LE_PumpName = qtw.QLineEdit()
+        self.LE_FlowUnits = qtw.QLineEdit()
+        self.LE_HeadUnits = qtw.QLineEdit()
+        self.LE_HeadCoefs = qtw.QLineEdit()
+        self.LE_EffCoefs = qtw.QLineEdit()
+        self.ax = None
+        self.canvas = None
+
+    def updateView(self, Model):
+        self.LE_PumpName.setText(Model.PumpName)
+        self.LE_FlowUnits.setText(Model.FlowUnits)
+        self.LE_HeadUnits.setText(Model.HeadUnits)
+        self.LE_HeadCoefs.setText(Model.LSFitHead.GetCoeffsString())
+        self.LE_EffCoefs.setText(Model.LSFitEff.GetCoeffsString())
+        self.DoPlot(Model)
+
+    def DoPlot(self, Model):
+        headx, heady, headRSq = Model.LSFitHead.GetPlotInfo(2, npoints=500)
+        effx, effy, effRSq = Model.LSFitEff.GetPlotInfo(3, npoints=500)
+
+        self.canvas.figure.clear()
+        axes = self.canvas.figure.add_subplot(111)
+        ax2 = axes.twinx()
+        self.ax = axes
+
+        head_fit = axes.plot(
+            headx, heady, '--',
+            label=f'Head($R^2$ = {headRSq:0.3f})'
+        )[0]
+
+        head_data = axes.plot(
+            Model.FlowData, Model.HeadData, 'o',
+            fillstyle='none',
+            label='Head'
+        )[0]
+
+        eff_fit = ax2.plot(
+            effx, effy, ':',
+            label=f'Efficiency($R^2$ = {effRSq:0.3f})'
+        )[0]
+
+        eff_data = ax2.plot(
+            Model.FlowData, Model.EffData, '^',
+            fillstyle='none',
+            label='Efficiency'
+        )[0]
+
+        axes.set_xlabel(f'Flow Rate ({Model.FlowUnits})')
+        axes.set_ylabel(f'Head ({Model.HeadUnits})')
+        ax2.set_ylabel('Efficiency (%)')
+        axes.set_title('Pump Head and Efficiency Curves')
+
+        axes.legend(handles=[head_fit, head_data], loc='center left')
+        ax2.legend(handles=[eff_fit, eff_data], loc='upper right')
+
+        self.canvas.draw()
+
+    def setViewWidgets(self, w):
+        self.LE_PumpName, self.LE_FlowUnits, self.LE_HeadUnits, self.LE_HeadCoefs, self.LE_EffCoefs, self.ax, self.canvas = w
